@@ -1,0 +1,32 @@
+<!-- ai_interface.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AI Interface</title>
+    <script>
+        var ws;
+        function connectAI() {
+            ws = new WebSocket("ws://127.0.0.1:8000/ws/ai"); // Adjust URL accordingly
+            ws.onmessage = function(event) {
+                var messages = document.getElementById("messages");
+                var message = document.createElement("li");
+                message.textContent = event.data;
+                messages.appendChild(message);
+            };
+        }
+
+        function sendMessage() {
+            if (ws) {
+                ws.send("AI: Trigger message."); // Example trigger message to AI
+            }
+        }
+    </script>
+</head>
+<body onload="connectAI()">
+<h1>AI Chat Interface</h1>
+<ul id="messages"></ul>
+<button onclick="sendMessage()">Send AI Message</button>
+<button onclick="window.location.href='main.html';">Back to Main</button>
+</body>
+</html>

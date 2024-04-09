@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+
+        #messages {
+            list-style-type: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        #messages li {
+            padding: 8px;
+            margin-bottom: 2px;
+            background-color: #f3f3f3;
+        }
+
+        #message-input, #status {
+            margin: 0;
+            padding: 10px;
+        }
+
+        #status {
+            color: green;
+        }
+
+        #connect-section, #chat-section {
+            display: none;
+        }
+
+    </style>
+</head>
+<body>
+<!--<button onclick="window.location.href='main.html';">Back to Main</button>-->
+<div id="status"></div>
+<div id="connect-section">
+    <input type="text" id="user-id-input" placeholder="Enter User ID"/>
+    <button onclick="connect()">Connect</button>
+</div>
+<div id="chat-section">
+    <ul id="messages"></ul>
+    <input type="text" id="message-input" autocomplete="off" placeholder="Type a message..."/>
+</div>
+
+<!--<button onclick="sendMessage()">Send</button>-->
+
+<script>
+    let ws = null;
+    let retryCount = 0;
+    let messagesCount = 0;
+    let isConnected = false; // Flag to track if the WebSocket connection was ever successfully established
+
+    document.addEventListener("DOMContentLoaded", function () {
+        document.getElementById("connect-section").style.display = "block";
+    });
+
+    function generateUUID() {
+        let d = new Date().getTime(); //Timestamp
+        let d2 = (performance && performance.now && (performance.now() * 1000)) || 0; //Time in microseconds since page-load or 0 if unsupported
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+            let r = Math.random() * 16; //random number between 0 and 16
+            if (d > 0) { //Use timestamp until depleted
+                r = (d + r) % 16 | 0;
+                d = Math.floor(d / 16);
+            } else { //Use microseconds since page-load if supported
+                r = (d2 + r) % 16 | 0;
+                d2 = Math.floor(d2 / 16);
+            }
+            return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+        });
+    }
+
+    function setStatus(message) {
+        const statusDiv = document.getElementById("status");
+        statusDiv.textContent = message;
+        setTimeout(() => {
+            statusDiv.textContent = '';
+        }, 4000); // Clear status after 4 seconds
+    }
+
+    function connectWebSocket(clientId,retry=false) {
+        return new Promise((resolve, reject) => {
+            const wsLocal = new WebSocket("ws://127.0.0.1:8000/ws/" + clientId);
+            wsLocal.binaryType = 'arraybuffer';
+            wsLocal.onmessage = onMessage;
+            // Assuming the WebSocket connection is established as 'ws'
+            wsLocal.onclose = function (event) {
+                console.log('WebSocket connection closed', event.code, event.reason);
+                debugger;
+                if( retryCount===0){
+                    onCloseRetry()
+                }
+
+            };
+            wsLocal.onopen = () => resolve(wsLocal); // Connection opened
+            wsLocal.onerror = (error) => reject(error); // Connection failed
+        });
+    }
+
+    async function connect(retry=false) {
+        let clientId = document.getElementById("user-id-input").value;
+        if (clientId.length < 1) {
+            alert("Please enter a valid User ID.");
+            return;
+        }
+
+        try {
+            retryCount = -1;
+            ws = await connectWebSocket(clientId,retry);
+            document.getElementById("connect-section").style.display = "none";
+            document.getElementById("chat-section").style.display = "block";
+            setStatus(`Connected as ${clientId}.`);
+            isConnected = true; // Connection successfully established
+            retryCount = 0;
+        } catch (error) {
+            console.error("WebSocket connection failed:", error);
+            // If the connection attempt failed and isConnected is still false, show a specific message
+            if (!isConnected && !retry) {
+                alert("Connection failed: Possibly due to an invalid User ID or server issue. Please try again.");
+            }
+        }
+    }
+
+    function addMessageToDashboard(message) {
+        let now = new Date();
+        let timeString = now.toTimeString().slice(0, 8);
+
+        let li = document.createElement("li");
+        li.textContent = `${timeString} - ${message}`; // Prepend the timeString to the message
+        document.getElementById("messages").appendChild(li);
+    }
+
+    function onMessage(event) {
+        messagesCount++;
+        let data = new Uint8Array(event.data);
+        let header = new DataView(data.buffer, 0, 4);
+        let messageLength = header.getUint32(0, true);
+        let decoder = new TextDecoder("utf-8");
+        let message = decoder.decode(data.slice(4, 4 + messageLength));
+        addMessageToDashboard(message);
+
+        setStatus(`Message received. Total: ${messagesCount}.`);
+    }
+
+    function onCloseRetry() {
+        if (retryCount < 3) {
+            setStatus(`Disconnected. Attempting to reconnect...`);
+            setTimeout(connect(true), 5000); // Try to reconnect after 5 seconds
+            retryCount++;
+        } else {
+            alert("Failed to reconnect after several attempts. Please reload the page.");
+        }
+    }
+
+    function sendMessage() {
+        let input = document.getElementById("message-input");
+        if (input.value.length < 1) {
+            console.log("Empty message. Not sending.");
+            return;
+        }
+        sendMessageEncoded(input.value);
+        addMessageToDashboard("You:" + input.value);
+        input.value = '';
+    }
+
+    function sendMessageEncoded(message) {
+        let encoder = new TextEncoder();
+        let encodedMessage = encoder.encode(message);
+
+        let header = new ArrayBuffer(4);
+        let headerView = new DataView(header);
+        headerView.setUint32(0, encodedMessage.length, true);
+
+        let combined = new Uint8Array(header.byteLength + encodedMessage.length);
+        combined.set(new Uint8Array(header), 0);
+        combined.set(encodedMessage, header.byteLength);
+
+        ws.send(combined);
+    }
+
+    document.getElementById("message-input").onkeypress = function (e) {
+        if (e.keyCode === 13) {
+            sendMessage();
+        }
+    };
+
+    // Initial connection attempt
+    // connect();
+</script>
+</body>
+</html>
